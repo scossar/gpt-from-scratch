@@ -8,4 +8,6 @@ nanoGPT repo: [nanoGPT](https://github.com/karpathy/nanoGPT)
 
 - andrej_karpathy_gpt_from_scratch.md
 - gpt_from_scratch_help_bigram.md
-- andrej_karpathy_gpt_from_scratch_get_tokens_talking.md
+- andrej_karpathy_gpt_from_scratch_get_tokens_talking.md (a mathematical trick that's used in self-attention)
+- gpt_from_scratch_self_attention.md
+- single_head_of_self_attention_data_flow.md
