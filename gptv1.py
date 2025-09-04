@@ -6,7 +6,7 @@ from torch.nn import functional as F
 
 batch_size = 32
 block_size = 8
-max_iters = 50000 #5000
+max_iters = 5000
 eval_interval = 500
 learning_rate = 1e-3  # note that learning rate has been lowered from 1e-2
 device = "cuda" if torch.cuda.is_available() else "cpu"  # it's not available on my machine
@@ -92,7 +92,7 @@ class MultiHeadAttention(nn.Module):
         # I can follow the dataflow, but ...
         # the explanation is that the projection is just a linear transformation
         # of the output of the self-attention heads
-        out = self.proj(out)  
+        out = self.proj(out)
         return out
 
 
@@ -124,11 +124,8 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(n_embd)  # layer norm 2
 
     def forward(self, x):
-        # with skip connections! (x = x + ...)
-        # and layer normalization; it's a per-token nomalization; "makes them unit mean, unit
-        # gausian at initialization"
         x = x + self.sa(self.ln1(x))
-        x = x +self.ffwd(self.ln2(x))
+        x = x + self.ffwd(self.ln2(x))
         return x
 
 
@@ -141,6 +138,7 @@ class BigramLanguageModel(nn.Module):
             Block(n_embd, n_head=4),
             Block(n_embd, n_head=4),
             Block(n_embd, n_head=4),
+            nn.LayerNorm(n_embd),
         )
         self.lm_head = nn.Linear(n_embd, vocab_size)  # lm_head means language_model_head
 
@@ -149,7 +147,10 @@ class BigramLanguageModel(nn.Module):
         tok_emb = self.token_embedding_table(idx)  # (B,T,C) (B,T,n_embd)
         # look up indices (0 -> T-1) from position_embedding_table:
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))  # (T,C)
-        x = tok_emb + pos_emb  # (B,T,C), so x holds token identities and token positions
+        # note dx at the blocks input is where the residual connections matter. without the residual
+        # connections the gradients could become very small due to matrix multiplications in attention
+        # and feedforward layers; with residual connections,
+        x = tok_emb + pos_emb  # (B,T,C); x holds token identities and token positions
         x = self.blocks(x)  # (B,T,C)
         logits = self.lm_head(x)  # (B,T,vocab_size)
         
