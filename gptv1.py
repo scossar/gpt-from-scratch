@@ -4,14 +4,17 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-batch_size = 32
-block_size = 8
+batch_size = 64
+block_size = 256
 max_iters = 5000
 eval_interval = 500
-learning_rate = 1e-3  # note that learning rate has been lowered from 1e-2
+learning_rate = 3e-4
 device = "cuda" if torch.cuda.is_available() else "cpu"  # it's not available on my machine
 eval_iters = 200
-n_embd = 32
+n_embd = 384  # 384 // 6 = 64; head_size = n_embd // n_head; every head has 64 dimensions
+n_head = 6
+n_layer = 6
+dropout = 0.2  # every forward/backward pass 20% of calculations are dropped to 0
 
 torch.manual_seed(1337)
 
@@ -62,7 +65,8 @@ class Head(nn.Module):
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
-        self.register_buffer("tril", torch.tril(torch.ones(block_size, head_size)))
+        self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         B,T,C = x.shape
@@ -73,6 +77,7 @@ class Head(nn.Module):
         # make sure it doesn't communicate with the past (future?); the use of tril makes this a "decoder" block
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))  # (B,T,T)
         wei = F.softmax(wei, dim=-1)  # (B,T,T)
+        wei = self.dropout(wei)  # dropout
         v = self.value(x)  # (B,T,C)
         out = wei @ v  # (B,T,T) @ (B,T,C) --> (B,T,C)
         return out
@@ -86,13 +91,12 @@ class MultiHeadAttention(nn.Module):
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
         # note: I'm not following what this does
         self.proj = nn.Linear(n_embd, n_embd)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
-        # I can follow the dataflow, but ...
-        # the explanation is that the projection is just a linear transformation
-        # of the output of the self-attention heads
-        out = self.proj(out)
+        # see notes on Projection (and hopefully Dropput)
+        out = self.dropout(self.proj(out))
         return out
 
 
@@ -107,6 +111,8 @@ class FeedForward(nn.Module):
             nn.Linear(n_embd, 4 * n_embd),
             nn.ReLU(),
             nn.Linear(4 * n_embd, n_embd),  # the same idea as the projection layer in the attention module
+            # dropout is added right before the connection back into the residual pathway (`x + self.ffwd...`)
+            nn.Dropout(dropout),
         )
 
     def forward(self, x):
@@ -134,12 +140,14 @@ class BigramLanguageModel(nn.Module):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
-        self.blocks = nn.Sequential(
-            Block(n_embd, n_head=4),
-            Block(n_embd, n_head=4),
-            Block(n_embd, n_head=4),
-            nn.LayerNorm(n_embd),
-        )
+        # self.blocks = nn.Sequential(
+        #     Block(n_embd, n_head=4),
+        #     Block(n_embd, n_head=4),
+        #     Block(n_embd, n_head=4),
+        #     nn.LayerNorm(n_embd),
+        # )
+        self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)])  # note the use of the "splat" argument for unpacking Block list
+        self.ln_f = nn.LayerNorm(n_embd)  # final layer norm
         self.lm_head = nn.Linear(n_embd, vocab_size)  # lm_head means language_model_head
 
     def forward(self, idx, targets=None):
@@ -152,6 +160,7 @@ class BigramLanguageModel(nn.Module):
         # and feedforward layers; with residual connections,
         x = tok_emb + pos_emb  # (B,T,C); x holds token identities and token positions
         x = self.blocks(x)  # (B,T,C)
+        x = self.ln_f(x)  # (B,T,C)
         logits = self.lm_head(x)  # (B,T,vocab_size)
         
         if targets is None:
