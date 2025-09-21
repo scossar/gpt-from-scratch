@@ -1,7 +1,4 @@
 # making gptv1.py again
-# this script is just the bigram implementation; essentially the same as
-# the bigram implementation from the makemore code
-#
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -17,9 +14,7 @@ device = (
     "cuda" if torch.cuda.is_available() else "cpu"
 )  # it's not available on my machine
 eval_iters = 200
-n_embd = (
-    384  # 384 // 6 = 64; head_size = n_embd // n_head; every head has 64 dimensions
-)
+n_embd = 32
 n_head = 6
 n_layer = 6
 dropout = 0.2  # every forward/backward pass 20% of calculations are dropped to 0
@@ -67,13 +62,19 @@ def get_batch(split):
 
 # -----------------------------------------------------------------------------
 class BigramLanguageModel(nn.Module):
-    def __init__(self, vocab_size):
+    def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding_table = nn.Embedding(
+            vocab_size, n_embd
+        )  # vocab_size and n_embd are global variables
+        # language_model head; currently takes us from embedding layer to logits
+        self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
         # idx and targets are both (B, T) tensors of integers
-        logits = self.token_embedding_table(idx)  # (B, T, C)
+        # note that C is considered to be n_embd.size in this code
+        token_embeddings = self.token_embedding_table(idx)  # (B, T, C)
+        logits = self.lm_head(token_embeddings)  # (B, T, vocab_size)
 
         if targets is None:
             loss = None
@@ -86,8 +87,6 @@ class BigramLanguageModel(nn.Module):
 
         return logits, loss
 
-    # Note that in the simple Bigram implementation, the history that's passed with the context isn't used;
-    # the method is intentionally general so that it can be used with things we're going to implement later.
     def generate(self, idx, max_new_tokens):
         # idx is (B, T)
         for _ in range(max_new_tokens):
@@ -102,7 +101,7 @@ class BigramLanguageModel(nn.Module):
 batch_size = 32  # how many independent sequences are processed in parallel
 block_size = 8  # the *maximum* context length for predictions
 
-model = BigramLanguageModel(vocab_size)
+model = BigramLanguageModel()
 m = model.to(
     device
 )  # move the model to device so all calculations happen on GPU if it's available
@@ -143,6 +142,8 @@ for iter in range(10000):
 
 # sample from the model
 # context shape: (B, T) 0 is the newline character; reasonable starting point
-context = torch.zeros((1, 1), dtype=torch.long, device=device)
+context = torch.zeros(
+    (1, 1), dtype=torch.long, device=device
+)  # create context on device
 sampled = decode(m.generate(context, max_new_tokens=500)[0].tolist())
 print(sampled)
