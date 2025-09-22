@@ -17,9 +17,8 @@ device = (
     "cuda" if torch.cuda.is_available() else "cpu"
 )  # it's not available on my machine
 eval_iters = 200
-n_embd = (
-    384  # 384 // 6 = 64; head_size = n_embd // n_head; every head has 64 dimensions
-)
+n_embd = 32  # 384 // 6 = 64; head_size = n_embd // n_head; every head has 64 dimensions
+
 n_head = 6
 n_layer = 6
 dropout = 0.2  # every forward/backward pass 20% of calculations are dropped to 0
