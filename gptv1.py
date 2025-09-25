@@ -22,7 +22,10 @@ dropout = 0.2  # every forward/backward pass 20% of calculations are dropped to 
 
 torch.manual_seed(1337)
 
-with open("./tinyshakespeare.txt", "r", encoding="utf-8") as f:
+# with open("./tinyshakespeare.txt", "r", encoding="utf-8") as f:
+#     text = f.read()
+
+with open("../makemore/names.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
 chars = sorted(list(set(text)))

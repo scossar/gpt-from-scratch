@@ -1,4 +1,4 @@
-# making gptv1.py again
+# gptv1.py, but using `names.txt` for the training data (needs some tweaking)
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -6,25 +6,27 @@ from torch.nn import functional as F
 torch.manual_seed(1337)
 
 batch_size = 32
-block_size = 8
-max_iters = 10000  # 5000
+block_size = 4
+max_iters = 5000
 eval_interval = 500
-learning_rate = 1e-4  # 1e-3
+learning_rate = 1e-3
 device = (
     "cuda" if torch.cuda.is_available() else "cpu"
 )  # it's not available on my machine
 eval_iters = 200
-n_embd = 32
+n_embd = 27
 n_head = 6
 n_layer = 6
 dropout = 0.2  # every forward/backward pass 20% of calculations are dropped to 0
 
 
-with open("./tinyshakespeare.txt", "r", encoding="utf-8") as f:
+with open("../makemore/names.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
 chars = sorted(list(set(text)))
 vocab_size = len(chars)  # 65 characters
+print("chars", chars)
+print("vocab_size", vocab_size)
 
 # create a mapping from characters to integers
 stoi = {ch: i for i, ch in enumerate(chars)}
@@ -90,63 +92,6 @@ class Head(nn.Module):
 
 
 # -----------------------------------------------------------------------------
-# 1:22:30
-class MultiHeadAttention(nn.Module):
-    """multiple heads of self-attention running in parallel"""
-
-    def __init__(self, num_heads, head_size):
-        super().__init__()
-        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
-        # projection layer (?) I've got questions; the input and output have the same dimension, so what's being projected?
-        # note that in the FeedForward layer the projection actually does project to a new dimension
-        self.proj = nn.Linear(n_embd, n_embd)
-
-    def forward(self, x):
-        # run the heads in parallel and concatenate the outputs over the channel dimension
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
-        out = self.proj(out)  # projection layer; goes back into the "residual pathway"
-        return out
-
-
-# -----------------------------------------------------------------------------
-class FeedForward(nn.Module):
-    def __init__(self, n_embd):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(n_embd, 4 * n_embd),
-            nn.ReLU(),
-            nn.Linear(
-                4 * n_embd, n_embd
-            ),  # projection layer; going back into the residual pathway (in the Block)
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-# -----------------------------------------------------------------------------
-class Block(nn.Module):
-    """Transformer block: communication followed by computation"""
-
-    def __init__(self, n_embd, n_head):
-        super().__init__()
-        head_size = n_embd // n_head
-        self.sa = MultiHeadAttention(n_head, head_size)
-        self.ffwd = FeedForward(n_embd)
-        self.ln1 = nn.LayerNorm(n_embd)  # layer norm; applied before transformation
-        self.ln2 = nn.LayerNorm(n_embd)  # layer norm; applied before transformation
-
-    def forward(self, x):
-        x = x + self.sa(
-            self.ln1(x)
-        )  # note the skip connection; x is the "residual pathway"
-        x = x + self.ffwd(
-            self.ln2(x)
-        )  # note the skip connection; x is the "residual pathway"
-        return x
-
-
-# -----------------------------------------------------------------------------
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -154,17 +99,8 @@ class BigramLanguageModel(nn.Module):
             vocab_size, n_embd
         )  # vocab_size and n_embd are global variables
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
-        self.blocks = nn.Sequential(
-            Block(n_embd, n_head=4),
-            Block(n_embd, n_head=4),
-            Block(n_embd, n_head=4),
-            nn.LayerNorm(
-                n_embd
-            ),  # layer norm at the end of the transformer; before final linear layer
-        )
-        self.lm_head = nn.Linear(
-            n_embd, vocab_size
-        )  # language model head; final linear layer
+        self.sa_head = Head(n_embd)  # self-attention head
+        self.lm_head = nn.Linear(n_embd, vocab_size)  # language model head
 
     def forward(self, idx, targets=None):
         # idx and targets are both (B, T) tensors of integers
@@ -177,7 +113,7 @@ class BigramLanguageModel(nn.Module):
             torch.arange(T, device=device)
         )  # (T, C)
         x = tok_emb + pos_emb  # (B, T, C)
-        x = self.blocks(x)  # (B, T, C)
+        x = self.sa_head(x)  # apply one head of self attention
         logits = self.lm_head(x)  # (B, T, vocab_size)
 
         if targets is None:
@@ -228,7 +164,7 @@ def estimate_loss():
 # train the model
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-for iter in range(10000):
+for iter in range(50000):
     if iter % eval_interval == 0:
         losses = estimate_loss()
         print(
@@ -249,5 +185,5 @@ for iter in range(10000):
 context = torch.zeros(
     (1, 1), dtype=torch.long, device=device
 )  # create context on device
-sampled = decode(m.generate(context, max_new_tokens=5000)[0].tolist())
+sampled = decode(m.generate(context, max_new_tokens=500)[0].tolist())
 print(sampled)
